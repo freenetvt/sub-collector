@@ -2,9 +2,7 @@ name: Auto Update Subscription Pool
 
 on:
   schedule:
-    # اجرای خودکار هر 6 ساعت یک‌بار
     - cron: '0 */6 * * *'
-  # امکان اجرای دستی در هر لحظه
   workflow_dispatch:
 
 permissions:
@@ -23,19 +21,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download Xray-knife for Real Delay Testing
+      - name: Download Xray-knife (with fallback)
+        continue-on-error: true
         run: |
-          wget -q https://github.com/lilendian0x00/xray-knife/releases/latest/download/Xray-knife-linux-64.zip
-          unzip -q Xray-knife-linux-64.zip
-          chmod +x Xray-knife
-          rm Xray-knife-linux-64.zip
+          wget -q https://github.com/lilendian0x00/xray-knife/releases/latest/download/Xray-knife-linux-64.zip -O knife.zip
+          unzip -o -q knife.zip
+          chmod +x Xray-knife* || true
+          rm -f knife.zip
+          ls -la
 
-      - name: Run collector and real delay tester
+      - name: Run collector script
         run: python collector.py
 
       - name: Commit and push updated configs
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add sub.txt sub_b64.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update healthy configs [skip ci]" && git push)
+          git add sub.txt sub_b64.txt protocols/
+          git status
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update configs [skip ci]" && git push)
