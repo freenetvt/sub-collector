@@ -5,29 +5,25 @@ import ssl
 import subprocess
 import os
 
-# نادیده گرفتن خطاهای گواهی SSL برخی سرورها
+# نادیده گرفتن خطاهای گواهی SSL
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
-# پروتکل‌های پشتیبانی‌شده
-PROTOCOLS = (
-    "vless://",
-    "vmess://",
-    "trojan://",
-    "hysteria://",
-    "hysteria2://",
-    "hy2://",
-    "ss://",
-    "ssr://",
-    "tuic://",
-    "socks://",
-    "socks5://",
-    "http://",
-    "https://"
-)
+# دسته‌بندی پروتکل‌ها و پیشوندهای مربوط به هر فایل
+PROTOCOL_GROUPS = {
+    "vless": ("vless://",),
+    "vmess": ("vmess://",),
+    "trojan": ("trojan://",),
+    "hysteria": ("hysteria://", "hysteria2://", "hy2://"),
+    "shadowsocks": ("ss://", "ssr://"),
+    "tuic": ("tuic://",),
+    "socks": ("socks://", "socks5://"),
+    "http": ("http://", "https://")
+}
 
-# الگوی استخراج کانفیگ‌ها از متن و صفحات وب
+ALL_PROTOCOLS = tuple(p for group in PROTOCOL_GROUPS.values() for p in group)
+
 CONFIG_PATTERN = re.compile(
     r'(?:vless|vmess|trojan|hysteria2?|hy2|ssr?|tuic|socks5?|https?)://[^\s<>"\'`]+',
     re.IGNORECASE
@@ -63,7 +59,17 @@ def is_valid_format(line):
     if lower_line.startswith(("http://", "https://")):
         if "@" not in line and not re.search(r':\d{2,5}$', line.split('#')[0]):
             return False
-    return lower_line.startswith(PROTOCOLS)
+    return lower_line.startswith(ALL_PROTOCOLS)
+
+def save_sub_files(base_path, configs_list):
+    """ذخیره هم‌زمان نسخه متنی ساده و نسخه Base64 برای هر فایل"""
+    text_data = "\n".join(configs_list)
+    with open(f"{base_path}.txt", "w", encoding="utf-8") as f:
+        f.write(text_data)
+
+    b64_data = base64.b64encode(text_data.encode("utf-8")).decode("utf-8")
+    with open(f"{base_path}_b64.txt", "w", encoding="utf-8") as f:
+        f.write(b64_data)
 
 def main():
     if not os.path.exists("sources.txt"):
@@ -92,7 +98,7 @@ def main():
 
     print(f"Total unique configs extracted: {len(raw_configs)}")
 
-    # تفکیک پروکسی‌های ساده (socks/http) از پروتکل‌های هسته Xray/Sing-box
+    # تفکیک پروکسی‌های ساده از کانفیگ‌های قابل تست با Xray-knife
     proxy_configs = [c for c in raw_configs if c.lower().startswith(("socks://", "socks5://", "http://", "https://"))]
     xray_configs = [c for c in raw_configs if c not in proxy_configs]
 
@@ -128,18 +134,18 @@ def main():
         os.remove("temp_raw.txt")
 
     final_list = alive_configs + sorted(proxy_configs)
-    final_text = "\n".join(final_list)
 
-    # ذخیره نسخه متنی ساده
-    with open("sub.txt", "w", encoding="utf-8") as f:
-        f.write(final_text)
+    # ۱. ذخیره فایل تجمیعی کل سرورها (sub.txt و sub_b64.txt)
+    save_sub_files("sub", final_list)
 
-    # ذخیره نسخه Base64
-    b64_encoded = base64.b64encode(final_text.encode("utf-8")).decode("utf-8")
-    with open("sub_b64.txt", "w", encoding="utf-8") as f:
-        f.write(b64_encoded)
+    # ۲. ساخت پوشه protocols و ذخیره فایل جداگانه برای هر پروتکل
+    os.makedirs("protocols", exist_ok=True)
+    for group_name, prefixes in PROTOCOL_GROUPS.items():
+        group_configs = [c for c in final_list if c.lower().startswith(prefixes)]
+        save_sub_files(f"protocols/{group_name}", group_configs)
+        print(f"Saved {len(group_configs)} configs to protocols/{group_name}.txt")
 
-    print(f"Done! Healthy configs saved: {len(final_list)}")
+    print(f"Done! Total healthy configs: {len(final_list)}")
 
 if __name__ == "__main__":
     main()
