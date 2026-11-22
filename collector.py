@@ -4,7 +4,6 @@ import re
 import ssl
 import subprocess
 import os
-import glob
 import json
 import socket
 from urllib.parse import urlparse
@@ -32,11 +31,20 @@ CONFIG_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-MAX_DELAY_MS = 1800
+MAX_DELAY_MS = 2500
+
+def find_knife_binary():
+    for root, _, files in os.walk("."):
+        for fname in files:
+            low = fname.lower()
+            if "xray-knife" in low and not low.endswith((".zip", ".txt", ".md", ".json", ".sha256", ".dgst")):
+                full_path = os.path.join(root, fname)
+                os.chmod(full_path, 0o755)
+                return full_path
+    return None
 
 def decode_base64_safe(data):
     try:
-        # حذف تمام کاراکترهای خط جدید و فاصله برای دیکد صحیح فایل‌های بزرگ Base64
         cleaned = re.sub(r'\s+', '', data)
         missing_padding = len(cleaned) % 4
         if missing_padding:
@@ -54,7 +62,7 @@ def fetch_url(url):
         with urllib.request.urlopen(req, timeout=25, context=ctx) as response:
             return response.read().decode('utf-8', errors='ignore')
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        print(f"[WARN] Fetch failed for {url}: {e}")
         return ""
 
 def is_valid_format(line):
@@ -106,12 +114,13 @@ def save_sub_files(base_path, configs_list):
 
 def main():
     if not os.path.exists("sources.txt"):
-        print("ERROR: sources.txt not found!")
+        print("[ERROR] sources.txt not found!")
         return
 
     with open("sources.txt", "r", encoding="utf-8") as f:
         urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
+    print(f"[INFO] Loaded {len(urls)} URLs from sources.txt")
     raw_configs = set()
 
     for url in urls:
@@ -119,7 +128,6 @@ def main():
         if not raw_content:
             continue
 
-        # بررسی هم متن خام و هم متن دیکدشده Base64
         decoded_content = decode_base64_safe(raw_content)
         combined_text = raw_content + "\n" + decoded_content
 
@@ -128,38 +136,37 @@ def main():
             line = line.strip()
             if not line:
                 continue
-            matches = CONFIG_PATTERN.findall(line)
-            for match in matches:
+            for match in CONFIG_PATTERN.findall(line):
                 clean_config = match.strip()
                 if is_valid_format(clean_config):
                     raw_configs.add(clean_config)
-        added = len(raw_configs) - before_count
-        print(f"Fetched {url} -> +{added} new configs")
+        print(f"[INFO] {url} -> +{len(raw_configs) - before_count} configs")
 
-    print(f"Total unique configs extracted: {len(raw_configs)}")
+    print(f"[INFO] Total unique configs extracted: {len(raw_configs)}")
 
     proxy_configs = [c for c in raw_configs if c.lower().startswith(("socks://", "socks5://", "http://", "https://"))]
     xray_configs = [c for c in raw_configs if c not in proxy_configs]
     alive_configs = []
 
-    knife_bins = [f for f in glob.glob("Xray-knife*") if os.path.isfile(f)]
+    knife_bin = find_knife_binary()
+    print(f"[INFO] Detected xray-knife binary: {knife_bin}")
 
-    if knife_bins and xray_configs:
-        knife_bin = f"./{knife_bins[0]}"
-        print(f"Running Real Delay test via {knife_bin} on {len(xray_configs)} configs...")
+    if knife_bin and xray_configs:
+        sample_to_test = xray_configs[:1200]
         with open("temp_raw.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(xray_configs))
+            f.write("\n".join(sample_to_test))
 
         cmd = [
             knife_bin, "http",
             "-f", "temp_raw.txt",
             "-o", "valid_xray.txt",
-            "-t", "60",
+            "-t", "50",
             "-m", str(MAX_DELAY_MS),
             "-u", "http://www.gstatic.com/generate_204",
             "-s"
         ]
-        subprocess.run(cmd, check=False)
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        print(f"[INFO] xray-knife exit code: {res.returncode}")
 
         if os.path.exists("valid_xray.txt"):
             with open("valid_xray.txt", "r", encoding="utf-8") as f:
@@ -170,13 +177,17 @@ def main():
             os.remove("temp_raw.txt")
 
     if not alive_configs and xray_configs:
-        print("Running TCP health check fallback...")
+        print("[INFO] Running TCP health check fallback...")
         with ThreadPoolExecutor(max_workers=60) as executor:
-            futures = {executor.submit(check_tcp_health, cfg): cfg for cfg in xray_configs}
+            futures = {executor.submit(check_tcp_health, cfg): cfg for cfg in xray_configs[:1200]}
             for future in as_completed(futures):
                 cfg, is_alive = future.result()
                 if is_alive:
                     alive_configs.append(cfg)
+
+    if not alive_configs and xray_configs:
+        print("[WARN] Using extracted configs as fallback.")
+        alive_configs = xray_configs[:500]
 
     final_list = alive_configs + sorted(proxy_configs)
 
@@ -185,9 +196,9 @@ def main():
     for group_name, prefixes in PROTOCOL_GROUPS.items():
         group_configs = [c for c in final_list if c.lower().startswith(prefixes)]
         save_sub_files(f"protocols/{group_name}", group_configs)
-        print(f"Saved {len(group_configs)} configs to protocols/{group_name}.txt")
+        print(f"[INFO] protocols/{group_name}.txt -> {len(group_configs)} configs")
 
-    print(f"Done! Total healthy configs saved: {len(final_list)}")
+    print(f"[DONE] Total configs saved in sub.txt: {len(final_list)}")
 
 if __name__ == "__main__":
     main()
