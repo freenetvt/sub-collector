@@ -1,5 +1,7 @@
 https://sub.plenix.cyou/
 https://shadowmere.xyz/api/b64sub/
+https://sub.plenix.cyou/
+https://shadowmere.xyz/api/b64sub/
 https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt
 https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_base64_Sub.txt
 https://raw.githubusercontent.com/barry-far/V2ray-config/main/All_Configs_Sub.txt
